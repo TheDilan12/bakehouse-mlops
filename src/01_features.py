@@ -23,7 +23,7 @@
 
 # COMMAND ----------
 
-#testing CI/CD with databricks
+#testing CI/CD with databricks_v2
 dbutils.widgets.text("catalog", "workspace")
 dbutils.widgets.text("schema", "bakehouse_dev")
 #testing
