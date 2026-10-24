@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC # MLflow en Databricks, paso a paso
 # MAGIC
@@ -132,6 +136,33 @@ print(f"Run: {run.info.run_id} · accuracy {accuracy_score(y_test, pred):.3f}")
 # COMMAND ----------
 
 # TODO: crea el run regresion_logistica_c01 con C = 0.1, registra accuracy, f1_macro y el tag autor
+from sklearn.metrics import f1_score
+
+def matriz_confusion(y_real, y_pred, titulo):
+    figura, eje = plt.subplots(figsize=(4, 4))
+    ConfusionMatrixDisplay.from_predictions(y_real, y_pred, ax=eje, colorbar=False)
+    eje.set_title(titulo)
+    plt.close(figura)
+    return figura
+
+with mlflow.start_run(run_name="regresion_logistica_c01") as run:
+    C = 0.1
+    modelo = make_pipeline(StandardScaler(), LogisticRegression(C=C, max_iter=1000))
+    modelo.fit(X_train, y_train)
+    pred = modelo.predict(X_test)
+
+    acc = accuracy_score(y_test, pred)
+    f1 = f1_score(y_test, pred, average="macro")
+
+    mlflow.log_param("algoritmo", "LogisticRegression")
+    mlflow.log_param("C", C)
+    mlflow.log_metric("accuracy", acc)
+    mlflow.log_metric("f1_macro", f1)
+    mlflow.set_tag("autor", "Dilan")
+    mlflow.log_figure(matriz_confusion(y_test, pred, "Regresión logística (C=0.1)"), "matriz_confusion.png")
+    mlflow.log_text("Variante con regularización más fuerte (C=0.1).", "notas.txt")
+
+print(f"Run: {run.info.run_id} · accuracy {acc:.3f} · f1_macro {f1:.3f}")
 
 
 # COMMAND ----------
@@ -173,9 +204,12 @@ combinaciones = [
 ]
 
 with mlflow.start_run(run_name="busqueda_random_forest") as padre:
+    
     mlflow.set_tag("etapa", "busqueda")
+    
     for params in combinaciones:
         nombre = f"rf_{params['n_estimators']}_prof_{params['max_depth']}"
+        
         with mlflow.start_run(run_name=nombre, nested=True):
             modelo = RandomForestClassifier(random_state=42, **params).fit(X_train, y_train)
             pred = modelo.predict(X_test)
@@ -201,6 +235,26 @@ print(f"Búsqueda terminada: {len(combinaciones)} runs hijos")
 # COMMAND ----------
 
 # TODO: repite la búsqueda agregando min_samples_leaf en [1, 5] dentro del padre busqueda_random_forest_v2
+combinaciones_v2 = [
+    {"n_estimators": n, "max_depth": d, "min_samples_leaf": m}
+    for n in [10, 50, 150]
+    for d in [2, 4, None]
+    for m in [1, 5]
+]
+
+with mlflow.start_run(run_name="busqueda_random_forest_v2") as padre_v2:
+
+    for params in combinaciones_v2:
+        nombre = f"rf_{params['n_estimators']}_prof_{params['max_depth']}_hoja_{params['min_samples_leaf']}"
+
+        with mlflow.start_run(run_name=nombre, nested=True):
+            modelo = RandomForestClassifier(random_state=42, **params).fit(X_train, y_train)
+            pred = modelo.predict(X_test)
+            mlflow.log_params({"algoritmo": "RandomForest", **params})
+            mlflow.log_metric("accuracy", accuracy_score(y_test, pred))
+            mlflow.log_metric("f1_macro", f1_score(y_test, pred, average="macro"))
+
+print(f"Búsqueda terminada: {len(combinaciones_v2)} runs hijos")
 
 
 # COMMAND ----------
@@ -281,6 +335,7 @@ with mlflow.start_run(run_name="random_forest_final") as run_final:
     mlflow.log_metric("accuracy", accuracy_score(y_test, pred))
     mlflow.log_metric("f1_macro", f1_score(y_test, pred, average="macro"))
     mlflow.log_figure(matriz_confusion(y_test, pred, "Random forest final"), "matriz_confusion.png")
+    
     info_rf = mlflow.sklearn.log_model(
         modelo_final,
         name="modelo",
@@ -313,9 +368,11 @@ print(cargado.predict(X_test.head(5)))
 cliente = MlflowClient()
 
 v_rf = mlflow.register_model(info_rf.model_uri, NOMBRE_MODELO)
+
 cliente.update_registered_model(
     NOMBRE_MODELO, description="Clasificador de variedades de vino. Modelo de práctica del curso."
 )
+
 cliente.set_model_version_tag(NOMBRE_MODELO, v_rf.version, "f1_macro", f"{mejor['metrics.f1_macro']:.3f}")
 cliente.set_registered_model_alias(NOMBRE_MODELO, "champion", v_rf.version)
 
